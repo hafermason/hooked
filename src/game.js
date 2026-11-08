@@ -119,8 +119,9 @@ export class Game {
   }
 
   // ---------------------------------------------------------------- run lifecycle
-  start({ daily, runId }) {
+  start({ daily, runId, target = null, targetName = null }) {
     this.daily = daily || null;
+    this.target = target; this.targetName = targetName; this.targetBeaten = false;
     this.runId = runId;
     this.t = 0;
     this.run = { score: 0, fish: 0, counts: { common: 0, rare: 0, legendary: 0, king: 0 }, maxCombo: 1, shooed: 0, cans: 0, catches: [], duration: 0, dailyDone: false };
@@ -496,8 +497,8 @@ export class Game {
     this.combo = Math.min(CFG.combo.max, 1 + this.streak);
     this.run.maxCombo = Math.max(this.run.maxCombo, this.combo);
     this.pop('+' + pts.toLocaleString('en-US'), HOLE.x - 6, 150, '#FFE14D', 44);
-    if (label) this.pop(label, 92, 112, color, 30, 1.4);
-    if (this.combo >= 3) this.pop('x' + this.combo + ' COMBO', 120, 170, '#FF6FB5', 22);
+    if (label) this.pop(label, 92, 140, color, 30, 1.4);
+    if (this.combo >= 3) this.pop('x' + this.combo + ' COMBO', 120, 178, '#FF6FB5', 22);
     const big = c.type === 'king';
     this.burst(HOLE.x, HOLE.y, big ? 36 : 14);
     if (big) { this.flash = { color: '255,255,255', a: 0.8 }; this.shake = 0.5; }
@@ -516,7 +517,15 @@ export class Game {
     this.aimY = Math.max(this.aimY, 360);
   }
 
-  addScore(p) { this.run.score += p; }
+  addScore(p) {
+    this.run.score += p;
+    if (this.target != null && !this.targetBeaten && this.run.score > this.target) {
+      this.targetBeaten = true;
+      this.pop('YOU BEAT ' + (this.targetName || 'YOUR FRIEND').toUpperCase().slice(0, 12) + '!', W / 2, 360, '#B6FF2E', 30, 2);
+      sfx.play('rare');
+      this.hooks.onEvent && this.hooks.onEvent('beatFriend');
+    }
+  }
   checkDaily() {
     const d = this.daily;
     if (!d || !d.test || this.run.dailyDone) return;
@@ -721,6 +730,18 @@ export class Game {
     if (this.mult > 1) {
       c.fillStyle = '#B6FF2E'; rr(c, 12 + sw - 30, 6, 40, 24, 12); c.fill(); c.lineWidth = 3; c.strokeStyle = INK; c.stroke();
       c.font = "15px 'Lilita One'"; c.fillStyle = INK; c.textAlign = 'center'; c.fillText('x' + this.mult, 12 + sw - 10, 24);
+    }
+    // challenge target chip
+    if (this.target != null) {
+      const beaten = this.targetBeaten;
+      const label = beaten ? 'BEATEN!' : 'BEAT ' + this.target.toLocaleString('en-US');
+      c.font = "16px 'Lilita One'";
+      const tw = c.measureText(label).width + 26;
+      c.fillStyle = INK; rr(c, 14, 90, tw, 28, 14); c.fill();
+      c.fillStyle = beaten ? '#B6FF2E' : '#FF2E93'; rr(c, 14, 87, tw, 28, 14); c.fill();
+      c.lineWidth = 3; c.strokeStyle = INK; c.stroke();
+      c.fillStyle = beaten ? INK : '#FFFFFF'; c.textAlign = 'left'; c.textBaseline = 'middle';
+      c.fillText(label, 27, 102);
     }
     // worms
     const n = CFG.worms.max, ww = n * 36 + 18;

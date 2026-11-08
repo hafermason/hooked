@@ -89,9 +89,16 @@ async function call(action, extra = {}, timeoutMs = 8000) {
   } finally { clearTimeout(timer); }
 }
 
+// Where did this visit come from? ?src=tiktok etc. Remembered for the session so challenges carry it.
+export function visitSource() {
+  const m = /[?&]src=([a-z0-9_-]{1,20})/i.exec(location.search);
+  if (m) { try { sessionStorage.setItem('hooked.src', m[1].toLowerCase()); } catch (e) {} return m[1].toLowerCase(); }
+  try { return sessionStorage.getItem('hooked.src'); } catch (e) { return null; }
+}
+
 export const RemoteAPI = {
-  async startGame() {
-    try { return await call('start', {}, 4000); }
+  async startGame(challengeCode) {
+    try { return await call('start', { challenge: challengeCode || undefined }, 4000); }
     catch (e) { return LocalAPI.startGame(); } // offline: play anyway, score stays on the device
   },
   async getDailyChallenge() {
@@ -108,6 +115,14 @@ export const RemoteAPI = {
   },
   async getLeaderboard(kind = 'all') {
     return call('leaderboard', { board: kind });
+  },
+  // Returns a share URL for a saved run: https://<site>/c/ABC2345
+  async createChallenge(name, run, runId) {
+    const c = await call('challenge', { runId, src: visitSource() || undefined });
+    return { url: `${location.origin}/c/${c.code}`, code: c.code };
+  },
+  async getChallenge(code) {
+    return call('getChallenge', { code }, 5000);
   },
   track(name, meta) { return LocalAPI.track(name, meta); },
 };

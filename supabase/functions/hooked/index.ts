@@ -4,6 +4,8 @@
 //   start        -> { runId }               (server clock starts the run)
 //   submit       -> { rank, best }          (validates the run, then records it)
 //   leaderboard  -> { entries, me }          (board: 'all' | 'daily')
+//   challenge    -> { code, ... }            (create a share code for a saved run)
+//   getChallenge -> { name, score, fish, attempts, beaten }
 // All tables live in the private `hooked` schema; clients never write to them directly.
 import postgres from 'npm:postgres@3.4.4';
 
@@ -150,11 +152,17 @@ function validate(run: Run, serverSeconds: number, dailyCode: string): string | 
 }
 
 // ---------------------------------------------------------------- actions
-async function start(device: unknown) {
+const CODE_RE = /^[A-Z2-9]{7}$/;
+const cleanCode = (c: unknown) => { const v = String(c ?? '').toUpperCase(); return CODE_RE.test(v) ? v : null; };
+const cleanSrc = (s: unknown) => { const v = String(s ?? '').toLowerCase().slice(0, 20); return /^[a-z0-9_-]+$/.test(v) ? v : null; };
+
+async function start(device: unknown, challenge: unknown) {
   const p = await playerFor(device);
+  const code = cleanCode(challenge);
   const [{ n }] = await sql`select count(*)::int as n from hooked.runs where player_id = ${p.id} and started_at > now() - interval '10 minutes'`;
   if (n >= RULES.startsPer10Min) throw new HttpError(429, 'slow down');
-  const [r] = await sql`insert into hooked.runs (player_id) values (${p.id}) returning id`;
+  const [c] = code ? await sql`select code from hooked.challenges where code = ${code}` : [];
+  const [r] = await sql`insert into hooked.runs (player_id, challenge_code) values (${p.id}, ${c ? c.code : null}) returning id`;
   return { runId: r.id };
 }
 
@@ -166,7 +174,7 @@ async function submit(device: unknown, body: any) {
   const name = cleanName(body.name);
 
   return await sql.begin(async (tx) => {
-    const [r] = await tx`select id, player_id, status, extract(epoch from now() - started_at)::float as secs from hooked.runs where id = ${runId} for update`;
+    const [r] = await tx`select id, player_id, status, challenge_code, extract(epoch from now() - started_at)::float as secs from hooked.runs where id = ${runId} for update`;
     if (!r || r.player_id !== p.id) throw new HttpError(404, 'run not found');
     if (r.status === 'submitted') throw new HttpError(409, 'score already saved');
     if (r.secs > RULES.maxRunSeconds) throw new HttpError(410, 'run expired');
@@ -196,11 +204,60 @@ async function submit(device: unknown, body: any) {
     }
     const [mine] = await tx`select score from hooked.leaderboards where board = 'all' and period = 'all' and player_id = ${p.id}`;
     const [{ rank }] = await tx`select count(*)::int + 1 as rank from hooked.leaderboards where board = 'all' and period = 'all' and score > ${mine.score}`;
-    return { rank, best: mine.score };
+    let challenge = null;
+    if (r.challenge_code) {
+      const [ch] = await tx`select code, player_id, nickname, score from hooked.challenges where code = ${r.challenge_code} for update`;
+      if (ch && ch.player_id !== p.id) {
+        await tx`
+          insert into hooked.challenge_attempts (code, player_id, best_score, beat)
+          values (${ch.code}, ${p.id}, ${run.score}, ${run.score > ch.score})
+          on conflict (code, player_id) do update set
+            best_score = greatest(hooked.challenge_attempts.best_score, excluded.best_score),
+            beat = hooked.challenge_attempts.beat or excluded.beat,
+            updated_at = now()`;
+        await tx`
+          update hooked.challenges set
+            attempts = (select count(*) from hooked.challenge_attempts where code = ${ch.code}),
+            beaten   = (select count(*) from hooked.challenge_attempts where code = ${ch.code} and beat)
+          where code = ${ch.code}`;
+        challenge = { code: ch.code, name: ch.nickname, score: ch.score, beat: run.score > ch.score };
+      }
+    }
+    return { rank, best: mine.score, scoreId: s.id, challenge };
   }).then((res: any) => {
     if (res && res.rejected) throw new HttpError(422, 'Score rejected: ' + res.rejected);
     return res;
   });
+}
+
+// Create (or reuse) a share code for one of this player's saved, validated runs.
+async function createChallenge(device: unknown, body: any) {
+  const p = await playerFor(device);
+  const runId = String(body.runId || '');
+  if (!/^[0-9a-f-]{36}$/i.test(runId)) throw new HttpError(400, 'missing run');
+  const [s] = await sql`select s.id, s.nickname, s.score, s.fish from hooked.scores s where s.run_id = ${runId} and s.player_id = ${p.id}`;
+  if (!s) throw new HttpError(404, 'save the score first');
+  const [existing] = await sql`select code from hooked.challenges where score_id = ${s.id}`;
+  if (existing) return { code: existing.code, name: s.nickname, score: s.score, fish: s.fish };
+  const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let i = 0; i < 5; i++) {
+    const bytes = crypto.getRandomValues(new Uint8Array(7));
+    const code = Array.from(bytes, (b) => ALPHA[b % ALPHA.length]).join('');
+    const rows = await sql`
+      insert into hooked.challenges (code, player_id, score_id, nickname, score, fish, src)
+      values (${code}, ${p.id}, ${s.id}, ${s.nickname}, ${s.score}, ${s.fish}, ${cleanSrc(body.src)})
+      on conflict do nothing returning code`;
+    if (rows.length) return { code, name: s.nickname, score: s.score, fish: s.fish };
+  }
+  throw new HttpError(500, 'could not create challenge');
+}
+
+async function getChallenge(code: unknown) {
+  const c = cleanCode(code);
+  if (!c) throw new HttpError(404, 'challenge not found');
+  const [row] = await sql`select code, nickname, score, fish, attempts, beaten, created_at from hooked.challenges where code = ${c}`;
+  if (!row) throw new HttpError(404, 'challenge not found');
+  return { code: row.code, name: row.nickname, score: row.score, fish: row.fish, attempts: row.attempts, beaten: row.beaten, createdAt: row.created_at };
 }
 
 async function leaderboard(device: unknown, board: string) {
@@ -231,9 +288,11 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     switch (body.action) {
       case 'daily': return json(await daily());
-      case 'start': return json(await start(body.device));
+      case 'start': return json(await start(body.device, body.challenge));
       case 'submit': return json(await submit(body.device, body));
       case 'leaderboard': return json(await leaderboard(body.device, body.board));
+      case 'challenge': return json(await createChallenge(body.device, body));
+      case 'getChallenge': return json(await getChallenge(body.code));
       default: return json({ error: 'unknown action' }, 400);
     }
   } catch (e) {

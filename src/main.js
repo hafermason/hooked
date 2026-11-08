@@ -48,16 +48,45 @@ function decorateTitle() {
 
 // ------------------------------------------------------------ challenge-a-friend link
 const params = new URLSearchParams(location.search);
-let challenge = null; // { score, fish, name }
+let challenge = null; // { code?, score, fish, name, attempts?, beaten? }
+function challengeCodeFromUrl() {
+  const m = /^\/c\/([A-Za-z2-9]{7})\/?$/.exec(location.pathname);
+  return (m ? m[1] : params.get('c') || '').toUpperCase() || null;
+}
 async function loadChallenge() {
-  const id = params.get('c');
-  if (id && API.getChallenge) { try { challenge = await API.getChallenge(id); } catch (e) {} }
+  const code = challengeCodeFromUrl();
+  if (code && API.getChallenge) { try { challenge = await API.getChallenge(code); } catch (e) { challenge = null; } }
   if (!challenge && params.get('beat')) challenge = { score: +params.get('beat') || 0, fish: +params.get('fish') || 0, name: params.get('from') || '' };
-  if (challenge) {
-    $('#beatChip').style.display = 'flex';
-    $('#beatScore').textContent = fmt(challenge.score);
-    $('#beatWho').textContent = challenge.name ? 'from ' + challenge.name : '';
-  }
+  if (!challenge) return;
+  $('#beatChip').style.display = 'flex';
+  $('#beatScore').textContent = fmt(challenge.score);
+  $('#beatWho').textContent = challenge.name ? 'from ' + challenge.name : '';
+  showChallengeIntro();
+}
+
+// "Can you beat this?" card shown when a challenge link is opened (before playing).
+function showChallengeIntro() {
+  const c = challenge;
+  const who = esc(c.name || 'Your friend');
+  const el = document.createElement('div');
+  el.id = 'chIntro';
+  el.className = 'overlay dim';
+  el.innerHTML = `
+    <div class="card" style="left:28px;top:170px;width:334px;padding:52px 22px 22px;gap:12px;align-items:center;text-align:center">
+      <div class="abs center" style="top:-30px;left:-6px;width:334px">
+        <div style="transform:rotate(-4deg);background:#FF2E93;border:6px solid #1A0B3D;border-radius:18px;box-shadow:0 7px 0 #1A0B3D;padding:6px 20px">
+          <span class="ols lil" style="font-size:34px;line-height:1;color:#fff;letter-spacing:1px">CHALLENGE!</span></div></div>
+      <div style="font-weight:700;font-size:18px;line-height:1.25"><b class="lil" style="font-size:22px;color:#B3006A">${who}</b> caught <b>${fmt(c.fish)} fish</b> and scored</div>
+      <div class="ol lil" style="font-size:64px;line-height:1;color:#FFE14D">${fmt(c.score)}</div>
+      <div style="font-weight:700;font-size:16px">Think you can beat it?</div>
+      ${c.attempts ? `<div style="font-weight:600;font-size:13px;color:#5B1FD6">${c.attempts} ${c.attempts === 1 ? 'friend has' : 'friends have'} tried · ${c.beaten || 0} beat it</div>` : ''}
+      <button id="chGo" class="btn big green" style="width:100%;height:68px;font-size:30px;margin-top:4px">
+        <svg width="30" height="30" viewBox="0 0 48 48" aria-hidden="true"><path d="M14 8 L40 24 L14 40 Z" fill="#fff" stroke="#1A0B3D" stroke-width="5" stroke-linejoin="round"/></svg>ACCEPT</button>
+      <button id="chLater" class="btn" style="border:0;background:none;font-weight:700;font-size:14px;color:#5B1FD6;text-decoration:underline;padding:4px">Not now</button>
+    </div>`;
+  $('#title').appendChild(el);
+  $('#chGo').onclick = () => { el.remove(); play(); };
+  $('#chLater').onclick = () => el.remove();
 }
 
 // ------------------------------------------------------------ title data
@@ -88,9 +117,9 @@ async function play() {
   sfx.unlock();
   $('#pause').hidden = true;
   show('game');
-  try { runId = (await API.startGame()).runId; } catch (e) { runId = 'local-' + Date.now(); }
-  API.track('play');
-  game.start({ daily, runId });
+  try { runId = (await API.startGame(challenge && challenge.code)).runId; } catch (e) { runId = 'local-' + Date.now(); }
+  API.track('play', { challenge: challenge && challenge.code });
+  game.start({ daily, runId, target: challenge ? challenge.score : null, targetName: challenge ? challenge.name : null });
 }
 
 // ------------------------------------------------------------ boss overlay (design screen 3)
@@ -144,7 +173,7 @@ function showGameOver(run) {
     ['Legendary', run.counts.legendary, run.counts.legendary * T.legendary.base, PALETTES.legend, 'drop-shadow(0 0 4px #FFE14D)'],
     ['Rainbow King', run.counts.king, run.counts.king * CFG.boss.bonus, ['#FFE14D', '#fff', '#00E5FF'], 'drop-shadow(0 0 5px #FF2E93)'],
   ];
-  const beat = challenge && run.score > challenge.score;
+  const beat = challenge && run.score > challenge.score; // server confirms on save
   const name = store.get('hooked.name', '');
   const el = $('#over');
   el.innerHTML = `
@@ -216,7 +245,10 @@ async function saveScore(run) {
     const res = await API.submitScore(name, { ...run, runId });
     run.saved = true; run.savedResult = res;
     $('#saveBtn').textContent = 'SAVED!';
-    $('#saveMsg').textContent = res && res.rank ? `You're #${res.rank} on the leaderboard!` : '';
+    let msg = res && res.rank ? `You're #${res.rank} on the leaderboard!` : '';
+    if (res && res.challenge && res.challenge.beat) msg += ` You beat ${res.challenge.name}!`;
+    $('#saveMsg').textContent = msg;
+    prepareShare(run); // so CHALLENGE A FRIEND opens the share sheet instantly
     return res;
   } catch (e) {
     $('#saveBtn').textContent = 'SAVE';
@@ -225,20 +257,58 @@ async function saveScore(run) {
   }
 }
 
+// Build the share link once per run: save the score (validated server-side) then get a short code.
+function prepareShare(run) {
+  if (!run.sharePromise) {
+    run.sharePromise = (async () => {
+      const name = ($('#hk-name') && $('#hk-name').value.trim()) || store.get('hooked.name', '') || '';
+      let url = null;
+      if (!run.saved) await saveScore(run);
+      if (run.saved && API.createChallenge) { try { url = (await API.createChallenge(name, run, runId)).url; } catch (e) {} }
+      if (!url) url = `${location.origin}/?beat=${run.score}&fish=${run.fish}${name ? '&from=' + encodeURIComponent(name) : ''}`;
+      return { url, text: `I caught ${run.fish} fish and scored ${fmt(run.score)} in Hooked! Beat me.` };
+    })();
+    run.sharePromise.then((s) => { run.share = s; }).catch(() => { run.sharePromise = null; });
+  }
+  return run.sharePromise;
+}
+
 async function shareChallenge(run) {
-  const name = ($('#hk-name') && $('#hk-name').value.trim()) || store.get('hooked.name', '') || '';
-  let url;
-  try { url = API.createChallenge ? await API.createChallenge(name, run, runId) : null; } catch (e) { url = null; }
-  if (!url) url = `${location.origin}${location.pathname}?beat=${run.score}&fish=${run.fish}${name ? '&from=' + encodeURIComponent(name) : ''}`;
-  const text = `I caught ${run.fish} fish and scored ${fmt(run.score)} in Hooked! Beat me.`;
   const label = $('#challengeLabel');
   const done = (msg) => { label.textContent = msg; setTimeout(() => { if (label.isConnected) label.textContent = 'CHALLENGE A FRIEND'; }, 2200); };
+  let share = run.share;
+  if (!share) { label.textContent = 'MAKING LINK…'; share = await prepareShare(run); label.textContent = 'CHALLENGE A FRIEND'; }
   API.track('share', { score: run.score });
+  const res = await shareOrCopy(share);
+  if (res === 'shared') done('SENT!');
+  else if (res === 'copied') done('LINK COPIED!');
+  else if (res === 'manual') showShareCard(share);
+}
+
+// Native share sheet when available, else clipboard. 'manual' = browser refused (e.g. gesture expired).
+async function shareOrCopy({ url, text }) {
   if (navigator.share) {
-    try { await navigator.share({ title: 'Hooked!', text, url }); done('SENT!'); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.share({ title: 'Hooked!', text, url }); return 'shared'; }
+    catch (e) { if (e && e.name === 'AbortError') return 'cancelled'; }
   }
-  try { await navigator.clipboard.writeText(text + ' ' + url); done('LINK COPIED!'); }
-  catch (e) { prompt('Copy this link:', text + ' ' + url); }
+  try { await navigator.clipboard.writeText(text + ' ' + url); return 'copied'; } catch (e) { return 'manual'; }
+}
+
+function showShareCard(share) {
+  const el = document.createElement('div');
+  el.className = 'overlay dim';
+  el.innerHTML = `
+    <div class="card" style="left:28px;top:250px;width:334px;padding:22px;gap:12px">
+      <div class="lil" style="font-size:26px;text-align:center">Your challenge link</div>
+      <input readonly value="${esc(share.url)}" style="height:46px;border:4px solid #1A0B3D;border-radius:14px;padding:0 10px;font:600 15px Fredoka;color:#1A0B3D">
+      <button class="btn big pink" data-a="share" style="color:#fff">SHARE</button>
+      <button class="btn" data-a="close" style="border:0;background:none;font-weight:700;color:#5B1FD6;text-decoration:underline">Close</button>
+    </div>`;
+  $('#over').appendChild(el);
+  const inp = el.querySelector('input');
+  inp.onclick = () => inp.select();
+  el.querySelector('[data-a=share]').onclick = async () => { const r = await shareOrCopy(share); if (r === 'manual') { inp.select(); } else el.remove(); };
+  el.querySelector('[data-a=close]').onclick = () => el.remove();
 }
 
 // ------------------------------------------------------------ leaderboard (design screen 5)
