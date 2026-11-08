@@ -1,4 +1,11 @@
-# Cloudflare Pages config (free plan). Build command in the dashboard: npm run build
+# Cloudflare Worker (free plan) serving the game at https://hooked.hafermason.workers.dev
+# Deploy: npm run deploy   (builds dist/ then uploads the Worker)
 name = "hooked"
+main = "worker/index.js"
 compatibility_date = "2026-11-01"
-pages_build_output_dir = "./dist"
+workers_dev = true
+
+[[rules]]
+type = "Text"
+globs = ["**/dist/*.html", "**/dist/*.css", "**/dist/*.js"]
+fallthrough = false
