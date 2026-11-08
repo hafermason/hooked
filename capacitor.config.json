@@ -1,0 +1,24 @@
+{
+  "appId": "com.hafermason.hooked",
+  "appName": "Hooked!",
+  "webDir": "dist",
+  "backgroundColor": "#2B0A73",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#2B0A73",
+    "scrollEnabled": false
+  },
+  "android": {
+    "backgroundColor": "#2B0A73"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "launchAutoHide": false,
+      "backgroundColor": "#2B0A73",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP"
+    },
+    "StatusBar": { "overlaysWebView": true, "style": "DARK" }
+  }
+}

@@ -8,10 +8,13 @@ import appJs from '../dist/app.js';
 import css from '../dist/style.css';
 import statsHtml from './stats.html';
 import resvgWasm from '../node_modules/@resvg/resvg-wasm/index_bg.wasm';
-import lilita from '../node_modules/@expo-google-fonts/lilita-one/400Regular/LilitaOne_400Regular.ttf';
-import fredoka from '../node_modules/@expo-google-fonts/fredoka/700Bold/Fredoka_700Bold.ttf';
+import lilita from '../public/fonts/LilitaOne.ttf';
+import fredoka from '../public/fonts/Fredoka-700Bold.ttf';
+import fredoka500 from '../public/fonts/Fredoka-500Medium.ttf';
+import fredoka600 from '../public/fonts/Fredoka-600SemiBold.ttf';
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import { ogSvg } from './og.js';
+import { privacyHtml, supportHtml } from './legal.js';
 
 const API = 'https://gbdluiufwjdutslyljkw.supabase.co/functions/v1/hooked';
 const CODE_RE = /^\/(?:og\/)?c\/([A-Za-z2-9]{7})(?:\.png)?\/?$/;
@@ -19,6 +22,10 @@ const CODE_RE = /^\/(?:og\/)?c\/([A-Za-z2-9]{7})(?:\.png)?\/?$/;
 const FILES = {
   '/app.js': [appJs, 'text/javascript; charset=utf-8'],
   '/style.css': [css, 'text/css; charset=utf-8'],
+  '/fonts/LilitaOne.ttf': [lilita, 'font/ttf', 31536000],
+  '/fonts/Fredoka-500Medium.ttf': [fredoka500, 'font/ttf', 31536000],
+  '/fonts/Fredoka-600SemiBold.ttf': [fredoka600, 'font/ttf', 31536000],
+  '/fonts/Fredoka-700Bold.ttf': [fredoka, 'font/ttf', 31536000],
 };
 
 let wasmReady = null;
@@ -80,10 +87,11 @@ export default {
     const url = new URL(request.url);
     const p = url.pathname;
     const f = FILES[p];
-    if (f) return new Response(f[0], { headers: { 'Content-Type': f[1], 'Cache-Control': 'public, max-age=300' } });
+    if (f) return new Response(f[0], { headers: { 'Content-Type': f[1], 'Cache-Control': `public, max-age=${f[2] || 300}`, 'Access-Control-Allow-Origin': '*' } });
     if (p === '/og/default.png') return ogImage(request, ctx, null);
     if (p.startsWith('/og/c/')) { const m = CODE_RE.exec(p); return m ? ogImage(request, ctx, m[1]) : new Response('Not found', { status: 404 }); }
     if (p === '/stats') return new Response(statsHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
+    if (p === '/privacy' || p === '/support') return new Response(p === '/privacy' ? privacyHtml() : supportHtml(), { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=600' } });
     if (p.startsWith('/c/')) {
       const m = CODE_RE.exec(p);
       const ch = m ? await getChallenge(m[1].toUpperCase()) : null;

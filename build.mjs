@@ -1,6 +1,7 @@
 // Bundles src/ into dist/ for deployment (one JS + one CSS file).
 import { build } from 'esbuild';
-import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, rmSync } from 'fs';
+rmSync('dist', { recursive: true, force: true });
 mkdirSync('dist', { recursive: true });
 await build({ entryPoints: ['src/main.js'], bundle: true, minify: true, format: 'esm', outfile: 'dist/app.js', target: 'es2020' });
 await build({ entryPoints: ['src/style.css'], minify: true, outfile: 'dist/style.css' });

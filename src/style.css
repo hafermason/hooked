@@ -1,5 +1,9 @@
+@font-face{font-family:'Lilita One';src:url(/fonts/LilitaOne.ttf) format('truetype');font-weight:400;font-display:block}
+@font-face{font-family:'Fredoka';src:url(/fonts/Fredoka-500Medium.ttf) format('truetype');font-weight:500;font-display:swap}
+@font-face{font-family:'Fredoka';src:url(/fonts/Fredoka-600SemiBold.ttf) format('truetype');font-weight:600;font-display:swap}
+@font-face{font-family:'Fredoka';src:url(/fonts/Fredoka-700Bold.ttf) format('truetype');font-weight:700;font-display:swap}
 html,body{margin:0;height:100%;background:#12052E;overflow:hidden;overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
-#wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+#wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 #stage{position:relative;width:390px;height:844px;flex:none;overflow:hidden;font-family:'Fredoka',sans-serif;color:#1A0B3D;transform-origin:center center;background:#2B0A73}
 .screen{position:absolute;inset:0;overflow:hidden;display:none}
 .screen.on{display:block}

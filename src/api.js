@@ -1,3 +1,4 @@
+import { siteOrigin, isNative } from './native.js';
 // Backend hooks the design calls. Step 1: local (on-device) implementation.
 // Step 2 swaps these for Supabase; the game code does not change.
 
@@ -100,6 +101,7 @@ export function visitSource() {
 
 function deviceKind() {
   const ua = navigator.userAgent || '';
+  if (isNative) return /Android/.test(ua) ? 'android' : 'ios';
   if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
   if (/Android/.test(ua)) return 'android';
   if (/Windows|Macintosh|Linux|CrOS/.test(ua)) return 'desktop';
@@ -156,7 +158,7 @@ export const RemoteAPI = {
   // Returns a share URL for a saved run: https://<site>/c/ABC2345
   async createChallenge(name, run, runId) {
     const c = await call('challenge', { runId, src: visitSource() || undefined });
-    return { url: `${location.origin}/c/${c.code}`, code: c.code };
+    return { url: `${siteOrigin()}/c/${c.code}`, code: c.code };
   },
   async getChallenge(code) {
     return call('getChallenge', { code }, 5000);

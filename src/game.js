@@ -1,6 +1,7 @@
 import { CFG, ramp } from './config.js';
 import { SP, drawSpr, INK } from './sprites.js';
 import { sfx } from './sfx.js';
+import { haptic } from './native.js';
 
 const W = CFG.stage.w, H = CFG.stage.h;
 const HOLE = CFG.world.hole;
@@ -361,7 +362,7 @@ export class Game {
           h.carry = { type: f.type, pal: f.pal, w: f.w, pull: def.pull, struggle: def.struggle };
           this.fish.splice(i, 1);
           sfx.play('hook');
-          if (navigator.vibrate) navigator.vibrate(18);
+          haptic('light');
           break;
         }
       }
@@ -373,7 +374,7 @@ export class Game {
           h.carry = { type: 'king', pal: 'king', w: B.size, pull: B.pull, struggle: B.struggle, passes: k.passes };
           this.king = null;
           sfx.play('hook');
-          if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+          haptic('heavy');
         }
       }
     }
@@ -478,7 +479,7 @@ export class Game {
     const hc = this.hookC();
     this.pop(text, clamp(hc.x, 70, W - 70), hc.y - 34, color, 40);
     sfx.play(sound);
-    if (navigator.vibrate) navigator.vibrate(80);
+    haptic('error');
     if (this.worms <= 0) { this.state = 'dying'; this.dieT = 1.1; this.hooks.onEvent && this.hooks.onEvent('gameOver'); }
   }
 
@@ -503,7 +504,7 @@ export class Game {
     this.burst(HOLE.x, HOLE.y, big ? 36 : 14);
     if (big) { this.flash = { color: '255,255,255', a: 0.8 }; this.shake = 0.5; }
     sfx.play(big ? 'king' : c.type === 'common' ? 'catch' : 'rare');
-    if (navigator.vibrate) navigator.vibrate(big ? [40, 30, 40, 30, 80] : 25);
+    haptic(big ? 'success' : 'medium');
 
     if (c.type === 'king') {
       this.level++;

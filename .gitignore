@@ -2,3 +2,6 @@ node_modules
 .vercel
 .env*
 dist
+.wrangler
+*.jks
+*.keystore

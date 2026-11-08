@@ -3,6 +3,7 @@ import { loadSprites, fishInner, OTTER_SVG, KING_SVG, PALETTES } from './sprites
 import { API, DAILIES, store, setTrackContext } from './api.js';
 import { Game } from './game.js';
 import { sfx } from './sfx.js';
+import { initNative, nativeShare, siteOrigin, isNative, haptic } from './native.js';
 
 const $ = (s) => document.querySelector(s);
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
@@ -10,7 +11,10 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 // ------------------------------------------------------------ fit 390x844 stage to any screen
 function fit() {
-  const s = Math.min(window.innerWidth / 390, window.innerHeight / 844);
+  const cs = getComputedStyle($('#wrap'));
+  const w = window.innerWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const h = window.innerHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const s = Math.min(w / 390, h / 844);
   $('#stage').style.transform = `scale(${s})`;
 }
 window.addEventListener('resize', fit);
@@ -270,7 +274,7 @@ function prepareShare(run) {
       let url = null;
       if (!run.saved) await saveScore(run);
       if (run.saved && API.createChallenge) { try { url = (await API.createChallenge(name, run, runId)).url; } catch (e) {} }
-      if (!url) url = `${location.origin}/?beat=${run.score}&fish=${run.fish}${name ? '&from=' + encodeURIComponent(name) : ''}`;
+      if (!url) url = `${siteOrigin()}/?beat=${run.score}&fish=${run.fish}${name ? '&from=' + encodeURIComponent(name) : ''}`;
       return { url, text: `I caught ${run.fish} fish and scored ${fmt(run.score)} in Hooked! Beat me.` };
     })();
     run.sharePromise.then((s) => { run.share = s; }).catch(() => { run.sharePromise = null; });
@@ -292,6 +296,10 @@ async function shareChallenge(run) {
 
 // Native share sheet when available, else clipboard. 'manual' = browser refused (e.g. gesture expired).
 async function shareOrCopy({ url, text }) {
+  if (isNative) {
+    const r = await nativeShare({ title: 'Hooked!', text, url });
+    if (r !== 'unavailable') return r;
+  }
   if (navigator.share) {
     try { await navigator.share({ title: 'Hooked!', text, url }); return 'shared'; }
     catch (e) { if (e && e.name === 'AbortError') return 'cancelled'; }
@@ -401,6 +409,14 @@ $('#lbBtn').onclick = () => showBoard('all', 'title');
     document.fonts ? Promise.all([document.fonts.load("40px 'Lilita One'"), document.fonts.load("700 12px 'Fredoka'")]).catch(() => {}) : null,
   ]);
   game = new Game($('#cv'), hooks);
+  initNative({
+    onBack: () => {
+      if (current === 'game' && game.state === 'play') { pause(); return true; }
+      if (current === 'game' && game.state === 'paused') { $('#pause').hidden = true; game.resume(); return true; }
+      if (current === 'board' || current === 'over') { refreshTitle(); show('title'); return true; }
+      return false; // on the title screen: leave the app
+    },
+  });
   window.__hooked = { game, API };
   await refreshTitle();
   await loadChallenge();

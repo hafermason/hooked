@@ -1,0 +1,80 @@
+# Codemagic cloud builds for Hooked! (no Mac needed).
+# Free plan: 500 macOS M2 minutes / month. Leave billing OFF in Codemagic and you can never be charged.
+#
+# One-time setup in Codemagic (see README "Publishing"):
+#   - Team/Personal settings > Integrations > Developer Portal: add an App Store Connect API key, name it "Hooked ASC"
+#   - Code signing identities > Android keystores: upload hooked-upload.jks with reference name "hooked_upload_key"
+#   - App > Environment variables: group "google_play" with GCLOUD_SERVICE_ACCOUNT_CREDENTIALS (secure)
+#   - Fill APP_STORE_APPLE_ID below once the app exists in App Store Connect
+workflows:
+  ios-testflight:
+    name: iOS → TestFlight
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: Hooked ASC
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.hafermason.hooked
+      vars:
+        APP_STORE_APPLE_ID: 0          # TODO: the numeric "Apple ID" shown in App Store Connect > App Information
+        XCODE_PROJECT: ios/App/App.xcodeproj
+        XCODE_SCHEME: App
+      node: 22
+      xcode: latest
+    scripts:
+      - name: Install
+        script: npm ci
+      - name: Build game + sync into the iOS project
+        script: |
+          npm run build
+          npx cap sync ios
+      - name: Code signing
+        script: xcode-project use-profiles
+      - name: Build number (one higher than the latest TestFlight build)
+        script: |
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          cd ios/App && agvtool new-version -all $((LATEST + 1))
+      - name: Build .ipa
+        script: xcode-project build-ipa --project "$XCODE_PROJECT" --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-play:
+    name: Android → Google Play (internal testing)
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    environment:
+      android_signing:
+        - hooked_upload_key
+      groups:
+        - google_play
+      vars:
+        PACKAGE_NAME: com.hafermason.hooked
+      node: 22
+      java: 21
+    scripts:
+      - name: Install
+        script: npm ci
+      - name: Build game + sync into the Android project
+        script: |
+          npm run build
+          npx cap sync android
+      - name: Build signed .aab
+        script: |
+          LATEST=$(google-play get-latest-build-number --package-name "$PACKAGE_NAME" 2>/dev/null || echo 0)
+          NEXT=$((LATEST + 1))
+          cd android && ./gradlew bundleRelease -PversionCode=$NEXT -PversionName=1.0.$NEXT
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true
