@@ -1,6 +1,6 @@
 // Privacy policy + support pages required by the App Store and Google Play.
 // CONTACT is shown publicly on both pages.
-export const CONTACT = 'CONTACT_EMAIL_NOT_SET';
+export const CONTACT = 'haferdigitals@gmail.com';
 const UPDATED = 'November 8, 2026';
 
 const shell = (title, body) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
