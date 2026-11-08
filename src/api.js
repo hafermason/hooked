@@ -55,3 +55,62 @@ export const LocalAPI = {
 
 export let API = LocalAPI;
 export function setAPI(a) { API = a; }
+
+// ------------------------------------------------------------------ Supabase backend
+// Publishable key: safe to ship in the browser. All writes go through the `hooked` edge function,
+// which validates every run server-side; the database tables are private.
+export const BACKEND = {
+  url: 'https://gbdluiufwjdutslyljkw.supabase.co/functions/v1/hooked',
+  key: 'sb_publishable_vYeqtms6tqclS2xm4evZSA_BudmJvbz',
+};
+
+function deviceId() {
+  let id = store.get('hooked.device', null);
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+    store.set('hooked.device', id);
+  }
+  return id;
+}
+
+async function call(action, extra = {}, timeoutMs = 8000) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(BACKEND.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: BACKEND.key },
+      body: JSON.stringify({ action, device: deviceId(), ...extra }),
+      signal: ctl.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { const e = new Error(data.error || 'Server error'); e.status = res.status; throw e; }
+    return data;
+  } finally { clearTimeout(timer); }
+}
+
+export const RemoteAPI = {
+  async startGame() {
+    try { return await call('start', {}, 4000); }
+    catch (e) { return LocalAPI.startGame(); } // offline: play anyway, score stays on the device
+  },
+  async getDailyChallenge() {
+    try { return await call('daily', {}, 4000); } catch (e) { return LocalAPI.getDailyChallenge(); }
+  },
+  async submitScore(name, run) {
+    if (!run.runId || String(run.runId).startsWith('local-')) {
+      await LocalAPI.submitScore(name, run);
+      throw new Error('Offline: score saved on this phone only.');
+    }
+    const { runId, ...clean } = run;
+    const payload = { score: clean.score, fish: clean.fish, duration: +clean.duration.toFixed(2), maxCombo: clean.maxCombo, shooed: clean.shooed, cans: clean.cans, counts: clean.counts, catches: clean.catches, dailyDone: clean.dailyDone };
+    return call('submit', { runId, name, run: payload });
+  },
+  async getLeaderboard(kind = 'all') {
+    return call('leaderboard', { board: kind });
+  },
+  track(name, meta) { return LocalAPI.track(name, meta); },
+};
+
+// Use the real backend unless ?offline is in the URL.
+if (!/[?&]offline\b/.test(location.search)) API = RemoteAPI;

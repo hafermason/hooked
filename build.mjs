@@ -9,5 +9,4 @@ let html = readFileSync('index.html', 'utf8')
   .replace('<script type="module" src="/src/main.js"></script>', '<script type="module" src="/app.js"></script>');
 writeFileSync('dist/index.html', html);
 if (existsSync('public')) cpSync('public', 'dist', { recursive: true });
-writeFileSync('dist/vercel.json', readFileSync('vercel.json'));
 console.log('built dist/');
