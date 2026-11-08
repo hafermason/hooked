@@ -1,0 +1,10 @@
+{
+  "name": "hooked",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "python3 -m http.server 5173"
+  },
+  "devDependencies": { "esbuild": "^0.24.0" }
+}
