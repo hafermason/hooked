@@ -1,6 +1,6 @@
 import { CFG } from './config.js';
 import { loadSprites, fishInner, OTTER_SVG, KING_SVG, PALETTES } from './sprites.js';
-import { API, DAILIES, store } from './api.js';
+import { API, DAILIES, store, setTrackContext } from './api.js';
 import { Game } from './game.js';
 import { sfx } from './sfx.js';
 
@@ -58,6 +58,7 @@ async function loadChallenge() {
   if (code && API.getChallenge) { try { challenge = await API.getChallenge(code); } catch (e) { challenge = null; } }
   if (!challenge && params.get('beat')) challenge = { score: +params.get('beat') || 0, fish: +params.get('fish') || 0, name: params.get('from') || '' };
   if (!challenge) return;
+  if (challenge.code) { setTrackContext({ code: challenge.code }); API.track('challenge_open', { score: challenge.score }); }
   $('#beatChip').style.display = 'flex';
   $('#beatScore').textContent = fmt(challenge.score);
   $('#beatWho').textContent = challenge.name ? 'from ' + challenge.name : '';
@@ -85,7 +86,7 @@ function showChallengeIntro() {
       <button id="chLater" class="btn" style="border:0;background:none;font-weight:700;font-size:14px;color:#5B1FD6;text-decoration:underline;padding:4px">Not now</button>
     </div>`;
   $('#title').appendChild(el);
-  $('#chGo').onclick = () => { el.remove(); play(); };
+  $('#chGo').onclick = () => { el.remove(); API.track('challenge_accept', {}); play(); };
   $('#chLater').onclick = () => el.remove();
 }
 
@@ -108,7 +109,10 @@ const hooks = {
   onGameOver: (run) => { sfx.play('over'); showGameOver(run); },
   onBossIntro: (score, bonus) => showBoss(score, bonus),
   onBossIntroEnd: () => { $('#boss').hidden = true; $('#boss').innerHTML = ''; },
-  onEvent: (name) => { window.dispatchEvent(new CustomEvent('hooked:event', { detail: name })); },
+  onEvent: (name) => {
+    if (name === 'beatFriend') API.track('beat_friend', { score: game.run.score });
+    window.dispatchEvent(new CustomEvent('hooked:event', { detail: name }));
+  },
 };
 let game;
 let runId = null;
@@ -165,7 +169,7 @@ function showGameOver(run) {
   lastRun = run;
   const prevBest = store.get('hooked.best', 0);
   if (run.score > prevBest) store.set('hooked.best', run.score);
-  API.track('finish', { score: run.score, fish: run.fish });
+  API.track('finish', { score: run.score, fish: run.fish, duration: Math.round(run.duration), maxCombo: run.maxCombo, king: run.counts.king });
   const T = CFG.fish.types;
   const rows = [
     ['Common', run.counts.common, run.counts.common * T.common.base, PALETTES.orange, 'none'],
@@ -245,6 +249,7 @@ async function saveScore(run) {
     const res = await API.submitScore(name, { ...run, runId });
     run.saved = true; run.savedResult = res;
     $('#saveBtn').textContent = 'SAVED!';
+    API.track('save', { score: run.score, rank: res && res.rank });
     let msg = res && res.rank ? `You're #${res.rank} on the leaderboard!` : '';
     if (res && res.challenge && res.challenge.beat) msg += ` You beat ${res.challenge.name}!`;
     $('#saveMsg').textContent = msg;
@@ -278,8 +283,8 @@ async function shareChallenge(run) {
   const done = (msg) => { label.textContent = msg; setTimeout(() => { if (label.isConnected) label.textContent = 'CHALLENGE A FRIEND'; }, 2200); };
   let share = run.share;
   if (!share) { label.textContent = 'MAKING LINK…'; share = await prepareShare(run); label.textContent = 'CHALLENGE A FRIEND'; }
-  API.track('share', { score: run.score });
   const res = await shareOrCopy(share);
+  if (res !== 'cancelled') API.track('share', { score: run.score, how: res });
   if (res === 'shared') done('SENT!');
   else if (res === 'copied') done('LINK COPIED!');
   else if (res === 'manual') showShareCard(share);
@@ -315,6 +320,7 @@ function showShareCard(share) {
 let boardBack = 'title';
 async function showBoard(kind = 'all', from) {
   if (from) boardBack = from;
+  API.track('leaderboard', { board: kind });
   const el = $('#board');
   el.innerHTML = `<div style="position:absolute;inset:0;background:linear-gradient(180deg,#FF4FA3 0%,#FF8A6B 20%,#19B8FF 38%,#6A2BEA 75%,#2B0A73 100%)"></div>
     <div class="center abs" style="top:400px"><div class="ol lil" style="font-size:30px;color:#fff">LOADING…</div></div>`;
@@ -398,5 +404,8 @@ $('#lbBtn').onclick = () => showBoard('all', 'title');
   window.__hooked = { game, API };
   await refreshTitle();
   await loadChallenge();
+  let ref = '';
+  try { ref = document.referrer ? new URL(document.referrer).hostname : ''; } catch (e) {}
+  API.track('visit', { ref, standalone: !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches) });
   $('#loading').remove();
 })();

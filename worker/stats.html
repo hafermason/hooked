@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Hooked! · Stats</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Lilita+One&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#1A0B3D}
+  body{margin:0;font-family:Fredoka,system-ui,sans-serif;color:var(--ink);background:linear-gradient(180deg,#19B8FF,#6A2BEA 60%,#2B0A73);min-height:100vh}
+  main{max-width:880px;margin:0 auto;padding:18px 14px 60px}
+  h1{font-family:'Lilita One';font-weight:400;font-size:40px;margin:6px 0 14px;color:#FFE14D;paint-order:stroke fill;-webkit-text-stroke:7px var(--ink);text-shadow:0 5px 0 var(--ink)}
+  .card{background:#fff;border:5px solid var(--ink);border-radius:22px;box-shadow:0 6px 0 var(--ink);padding:14px 16px;margin-bottom:16px;overflow-x:auto}
+  h2{font-family:'Lilita One';font-weight:400;font-size:22px;margin:0 0 10px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+  .kpi{background:#F3EDFF;border:3px solid var(--ink);border-radius:16px;padding:8px 12px}
+  .kpi b{display:block;font-family:'Lilita One';font-weight:400;font-size:30px;line-height:1.1}
+  .kpi span{font-weight:700;font-size:12px;letter-spacing:1px;color:#5B1FD6;text-transform:uppercase}
+  table{border-collapse:collapse;width:100%;font-size:15px;white-space:nowrap}
+  th{font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#5B1FD6;text-align:right;padding:6px 8px;border-bottom:3px solid var(--ink)}
+  td{text-align:right;padding:6px 8px;border-bottom:1px solid #E6DEFF;font-weight:600}
+  th:first-child,td:first-child{text-align:left}
+  .bar{display:inline-block;height:10px;border-radius:5px;background:#FF2E93;vertical-align:middle;margin-left:6px}
+  form{display:flex;gap:8px;flex-wrap:wrap}
+  input,select,button{font:600 16px Fredoka;border:4px solid var(--ink);border-radius:14px;padding:8px 12px;color:var(--ink);background:#fff}
+  button{background:#B6FF2E;box-shadow:0 4px 0 var(--ink);cursor:pointer;font-family:'Lilita One';font-weight:400;font-size:18px}
+  .err{color:#C4006B;font-weight:700}
+  .muted{color:#6B5F86;font-weight:600;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1>HOOKED! STATS</h1>
+  <div class="card">
+    <form id="f">
+      <input id="key" type="password" placeholder="Stats key" autocomplete="current-password" style="flex:1;min-width:180px">
+      <select id="days"><option value="1">Today</option><option value="7">7 days</option><option value="14" selected>14 days</option><option value="30">30 days</option><option value="90">90 days</option></select>
+      <button>LOAD</button>
+    </form>
+    <div id="msg" class="muted" style="margin-top:8px">Your key is kept only in this browser.</div>
+  </div>
+  <div id="out"></div>
+</main>
+<script>
+const API = 'https://gbdluiufwjdutslyljkw.supabase.co/functions/v1/hooked';
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '–';
+try { $('#key').value = localStorage.getItem('hooked.statsKey') || ''; } catch (e) {}
+
+function table(rows, cols) {
+  if (!rows.length) return '<div class="muted">No data yet.</div>';
+  const max = {};
+  cols.forEach(([k, , bar]) => { if (bar) max[k] = Math.max(1, ...rows.map((r) => +r[k] || 0)); });
+  return `<table><tr>${cols.map(([, h]) => `<th>${h}</th>`).join('')}</tr>${rows.map((r) => `<tr>${cols.map(([k, , bar]) => {
+    const v = r[k];
+    const shown = typeof v === 'number' ? fmt(v) : esc(v ?? '–');
+    return `<td>${shown}${bar ? `<span class="bar" style="width:${Math.round(60 * (+v || 0) / max[k])}px"></span>` : ''}</td>`;
+  }).join('')}</tr>`).join('')}</table>`;
+}
+
+async function load(e) {
+  if (e) e.preventDefault();
+  const key = $('#key').value.trim();
+  if (!key) return;
+  try { localStorage.setItem('hooked.statsKey', key); } catch (err) {}
+  $('#msg').className = 'muted'; $('#msg').textContent = 'Loading…';
+  try {
+    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'stats', key, days: +$('#days').value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    $('#msg').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    const t = d.daily.reduce((a, x) => { for (const k in x) if (k !== 'day') a[k] = (a[k] || 0) + x[k]; return a; }, {});
+    $('#out').innerHTML = `
+      <div class="card"><h2>Last ${d.days} day${d.days > 1 ? 's' : ''}</h2><div class="kpis">
+        <div class="kpi"><span>Visits</span><b>${fmt(t.visits)}</b></div>
+        <div class="kpi"><span>Plays</span><b>${fmt(t.plays)}</b></div>
+        <div class="kpi"><span>Games finished</span><b>${fmt(t.finished)}</b></div>
+        <div class="kpi"><span>Shares</span><b>${fmt(t.shares)}</b></div>
+        <div class="kpi"><span>Challenges accepted</span><b>${fmt(t.challenge_accepts)}</b></div>
+        <div class="kpi"><span>Visit → play</span><b>${pct(t.plays, t.visits)}</b></div>
+        <div class="kpi"><span>Shares / finish</span><b>${pct(t.shares, t.finished)}</b></div>
+        <div class="kpi"><span>Players · all time</span><b>${fmt(d.players.total)}</b></div>
+        <div class="kpi"><span>Active 24h / 7d</span><b>${fmt(d.players.active_24h)} / ${fmt(d.players.active_7d)}</b></div>
+        <div class="kpi"><span>Cheats rejected</span><b>${fmt(d.rejectedRuns)}</b></div>
+      </div></div>
+      <div class="card"><h2>Where players come from</h2><div class="muted" style="margin-bottom:6px">Tag links you post with ?src=tiktok, ?src=reels, ?src=shorts… "challenge" = opened from a friend's link.</div>
+        ${table(d.sources, [['src', 'Source'], ['visits', 'Visits', 1], ['plays', 'Plays', 1], ['finished', 'Finished'], ['shares', 'Shares'], ['challenge_accepts', 'Accepted'], ['avg_seconds', 'Avg secs']])}</div>
+      <div class="card"><h2>By day</h2>
+        ${table(d.daily, [['day', 'Day'], ['visits', 'Visits', 1], ['plays', 'Plays', 1], ['finished', 'Finished'], ['shares', 'Shares'], ['challenge_opens', 'Ch. opened'], ['challenge_accepts', 'Ch. accepted'], ['friends_beaten', 'Friends beaten'], ['clips', 'Clips']])}</div>
+      <div class="card"><h2>Devices</h2>${table(d.devices, [['device', 'Device'], ['players', 'Players', 1]])}</div>
+      <div class="card"><h2>Top challenges</h2>${table(d.challenges, [['code', 'Code'], ['nickname', 'From'], ['score', 'Score'], ['src', 'Source'], ['attempts', 'Tried', 1], ['beaten', 'Beaten']])}</div>
+      <div class="card"><h2>Top scores</h2>${table(d.top, [['nickname', 'Name'], ['score', 'Score', 1], ['fish', 'Fish']])}</div>`;
+  } catch (err) {
+    $('#msg').className = 'err'; $('#msg').textContent = err.message === 'wrong stats key' ? 'Wrong stats key (or HOOKED_STATS_KEY is not set in Supabase yet).' : 'Could not load stats: ' + err.message;
+  }
+}
+$('#f').addEventListener('submit', load);
+$('#days').addEventListener('change', load);
+if ($('#key').value) load();
+</script>
+</body>
+</html>

@@ -8,7 +8,10 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {
+    "@expo-google-fonts/fredoka": "^0.4.1",
+    "@expo-google-fonts/lilita-one": "^0.4.1",
+    "@resvg/resvg-wasm": "^2.6.2",
     "esbuild": "^0.24.0",
-    "wrangler": "^3.90.0"
+    "wrangler": "^4.158.0"
   }
 }

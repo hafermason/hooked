@@ -92,8 +92,45 @@ async function call(action, extra = {}, timeoutMs = 8000) {
 // Where did this visit come from? ?src=tiktok etc. Remembered for the session so challenges carry it.
 export function visitSource() {
   const m = /[?&]src=([a-z0-9_-]{1,20})/i.exec(location.search);
-  if (m) { try { sessionStorage.setItem('hooked.src', m[1].toLowerCase()); } catch (e) {} return m[1].toLowerCase(); }
+  let src = m ? m[1].toLowerCase() : null;
+  if (!src && location.pathname.startsWith('/c/')) src = 'challenge';
+  if (src) { try { sessionStorage.setItem('hooked.src', src); } catch (e) {} return src; }
   try { return sessionStorage.getItem('hooked.src'); } catch (e) { return null; }
+}
+
+function deviceKind() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  if (/Windows|Macintosh|Linux|CrOS/.test(ua)) return 'desktop';
+  return 'other';
+}
+
+// ---- analytics: small batched queue, flushed every couple of seconds and when the page is hidden
+const trackCtx = { code: null };
+export function setTrackContext(c) { Object.assign(trackCtx, c); }
+let queue = [], flushTimer = null;
+function flush() {
+  clearTimeout(flushTimer); flushTimer = null;
+  if (!queue.length) return;
+  const events = queue.splice(0, 25);
+  try {
+    fetch(BACKEND.url, {
+      method: 'POST', keepalive: true,
+      headers: { 'Content-Type': 'application/json', apikey: BACKEND.key },
+      body: JSON.stringify({ action: 'track', device: deviceId(), events }),
+    }).catch(() => {});
+  } catch (e) {}
+  if (queue.length) flushTimer = setTimeout(flush, 500);
+}
+function remoteTrack(name, meta = {}) {
+  queue.push({ name, src: visitSource() || undefined, code: trackCtx.code || undefined, device: deviceKind(), meta });
+  if (name === 'finish' || name === 'share' || queue.length >= 10) flush();
+  else if (!flushTimer) flushTimer = setTimeout(flush, 2000);
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  window.addEventListener('pagehide', flush);
 }
 
 export const RemoteAPI = {
@@ -124,7 +161,7 @@ export const RemoteAPI = {
   async getChallenge(code) {
     return call('getChallenge', { code }, 5000);
   },
-  track(name, meta) { return LocalAPI.track(name, meta); },
+  track(name, meta) { return remoteTrack(name, meta); },
 };
 
 // Use the real backend unless ?offline is in the URL.

@@ -8,4 +8,9 @@ workers_dev = true
 [[rules]]
 type = "Text"
 globs = ["**/dist/*.html", "**/dist/*.css", "**/dist/*.js"]
+fallthrough = true
+
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
 fallthrough = false

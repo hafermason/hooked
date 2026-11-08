@@ -6,6 +6,8 @@
 //   leaderboard  -> { entries, me }          (board: 'all' | 'daily')
 //   challenge    -> { code, ... }            (create a share code for a saved run)
 //   getChallenge -> { name, score, fish, attempts, beaten }
+//   track        -> { ok }                   (analytics events, batched)
+//   stats        -> daily totals            (needs the HOOKED_STATS_KEY secret)
 // All tables live in the private `hooked` schema; clients never write to them directly.
 import postgres from 'npm:postgres@3.4.4';
 
@@ -260,6 +262,59 @@ async function getChallenge(code: unknown) {
   return { code: row.code, name: row.nickname, score: row.score, fish: row.fish, attempts: row.attempts, beaten: row.beaten, createdAt: row.created_at };
 }
 
+// ---------------------------------------------------------------- analytics
+const EVENTS = new Set(['visit', 'play', 'finish', 'share', 'save', 'challenge_open', 'challenge_accept', 'beat_friend', 'leaderboard', 'clip']);
+const DEVICES = new Set(['ios', 'android', 'desktop', 'other']);
+
+async function track(device: unknown, body: any) {
+  const list = Array.isArray(body.events) ? body.events.slice(0, 25) : [];
+  if (!list.length) return { ok: true, stored: 0 };
+  const p = await playerFor(device);
+  const [{ n }] = await sql`select count(*)::int as n from hooked.events where player_id = ${p.id} and at > now() - interval '10 minutes'`;
+  if (n > 400) return { ok: true, stored: 0 }; // quietly drop floods
+  const rows = [];
+  for (const e of list) {
+    if (!e || !EVENTS.has(e.name)) continue;
+    let meta = e.meta && typeof e.meta === 'object' ? e.meta : {};
+    if (JSON.stringify(meta).length > 500) meta = {};
+    rows.push({
+      name: e.name,
+      player_id: p.id,
+      src: cleanSrc(e.src),
+      challenge_code: cleanCode(e.code),
+      device: DEVICES.has(e.device) ? e.device : 'other',
+      meta,
+    });
+  }
+  if (rows.length) await sql`insert into hooked.events ${sql(rows, 'name', 'player_id', 'src', 'challenge_code', 'device', 'meta')}`;
+  return { ok: true, stored: rows.length };
+}
+
+async function stats(body: any) {
+  const key = Deno.env.get('HOOKED_STATS_KEY');
+  if (!key || typeof body.key !== 'string' || body.key !== key) throw new HttpError(401, 'wrong stats key');
+  const days = Math.min(90, Math.max(1, Number(body.days) || 14));
+  const daily = await sql`
+    select day::text, sum(visits)::int visits, sum(plays)::int plays, sum(finished)::int finished, sum(shares)::int shares,
+           sum(challenge_opens)::int challenge_opens, sum(challenge_accepts)::int challenge_accepts, sum(friends_beaten)::int friends_beaten, sum(clips)::int clips
+    from hooked.stats_daily where day > (now() at time zone 'utc')::date - ${days}::int group by day order by day desc`;
+  const sources = await sql`
+    select src, sum(visits)::int visits, sum(plays)::int plays, sum(finished)::int finished, sum(shares)::int shares,
+           sum(challenge_accepts)::int challenge_accepts, round(avg(avg_seconds))::int avg_seconds
+    from hooked.stats_daily where day > (now() at time zone 'utc')::date - ${days}::int group by src order by visits desc, plays desc`;
+  const [players] = await sql`
+    select count(*)::int total,
+           count(*) filter (where created_at > now() - interval '1 day')::int new_24h,
+           count(*) filter (where last_seen_at > now() - interval '1 day')::int active_24h,
+           count(*) filter (where last_seen_at > now() - interval '7 days')::int active_7d
+    from hooked.players`;
+  const devices = await sql`select device, count(distinct player_id)::int players from hooked.events where at > now() - (${days}::int * interval '1 day') group by device order by 2 desc`;
+  const top = await sql`select nickname, score, fish from hooked.leaderboards where board = 'all' and period = 'all' order by score desc limit 5`;
+  const challenges = await sql`select code, nickname, score, src, attempts, beaten from hooked.challenges order by attempts desc, created_at desc limit 10`;
+  const [rejected] = await sql`select count(*)::int n from hooked.runs where status = 'rejected' and started_at > now() - (${days}::int * interval '1 day')`;
+  return { days, daily, sources, players, devices, top, challenges, rejectedRuns: rejected.n };
+}
+
 async function leaderboard(device: unknown, board: string) {
   const b = board === 'daily' ? 'daily' : 'all';
   const period = b === 'daily' ? today() : 'all';
@@ -293,6 +348,8 @@ Deno.serve(async (req) => {
       case 'leaderboard': return json(await leaderboard(body.device, body.board));
       case 'challenge': return json(await createChallenge(body.device, body));
       case 'getChallenge': return json(await getChallenge(body.code));
+      case 'track': return json(await track(body.device, body));
+      case 'stats': return json(await stats(body));
       default: return json({ error: 'unknown action' }, 400);
     }
   } catch (e) {

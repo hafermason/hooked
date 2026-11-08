@@ -127,7 +127,7 @@ export const KING_SVG = `
 <circle cx="160" cy="28" r="3" fill="#00E5FF" stroke="${INK}" stroke-width="2"/>
 <circle cx="192" cy="28" r="3" fill="#B6FF2E" stroke="${INK}" stroke-width="2"/>`;
 
-const DPR = Math.min(2, window.devicePixelRatio || 1);
+const DPR = typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1;
 
 function makeSprite(inner, vb, unitsPx) {
   const [, , vw, vh] = vb;
@@ -184,3 +184,4 @@ export async function loadSprites() {
   SP.wormOff = makeSprite(WORM_ICON('#D9D3E8'), [0, 0, 40, 40], 0.9);
   await Promise.all(Object.values(SP).map((s) => s.ready));
 }
+export { HOOK, WORM_BAIT, SHARK, JELLY, CRAB };
