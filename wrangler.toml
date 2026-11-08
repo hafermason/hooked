@@ -1,0 +1,4 @@
+# Cloudflare Pages config (free plan). Build command in the dashboard: npm run build
+name = "hooked"
+compatibility_date = "2026-11-01"
+pages_build_output_dir = "./dist"
